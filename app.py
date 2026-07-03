@@ -10,6 +10,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"New Super Sensitive Bot is Live!")
+url = f"https://telegram.org{TOKEN}/sendMessage"
 
 def run_render_server():
     port = int(os.environ.get("PORT", 10000))
