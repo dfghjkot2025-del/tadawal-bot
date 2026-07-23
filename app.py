@@ -1,74 +1,68 @@
-import os
-import time
-import requests
+import os, time, requests, pytz
+import yfinance as yf
+import pandas_ta as ta
+from datetime import datetime, timedelta
+from flask import Flask
+from threading import Thread
 
-# جلب المفاتيح تلقائياً وآمنياً من موقع Render
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+app = Flask('')
+@app.route('/')
+def home(): return "رادار المحترفين يعمل بنجاح"
 
-def send_telegram_signal(message):
-    """دالة إرسال الإشارات الفورية إلى التيليجرام"""
-    url = f"https://telegram.org{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
+# جلب الإعدادات من Render
+TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('CHAT_ID')
+MY_TZ = pytz.timezone('Asia/Aden')
+
+def send_msg(msg):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    try: requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
+
+def analyze(symbol, name, tf_label, interval):
     try:
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            print("🚀 تم إرسال الإشارة بنجاح إلى تيليجرام!")
-        else:
-            print(f"❌ خطأ في إرسال الرسالة: {response.text}")
-    except Exception as e:
-        print(f"⚠️ حدث خطأ أثناء الاتصال بتيليجرام: {e}")
-
-def fetch_live_market_data(pair="EURUSD"):
-    """دالة جلب أسعار السوق الحقيقية والمؤشرات الفنية بدقة عالية"""
-    # نستخدم واجهة برمجية مفتوحة وموثوقة لجلب بيانات الأسعار الحية للمؤشرات الفنية
-    api_url = f"https://taapi.io"
-    
-    # هذه البيانات والعمليات الرياضية يتم حسابها في الخلفية بناءً على شروط دمج المؤشرات
-    # RSI < 30 (تشبع بيعي) + MACD تقاطع صعودي + السعر فوق SMA = إشارة شراء (CALL)
-    # RSI > 70 (تشبع شرائي) + MACD تقاطع هبوطي + السعر تحت SMA = إشارة بيع (PUT)
-    
-    # لتأمين استمرار عمل السيرفر 24/7 بدون انقطاع وبشكل دوري ومستقر:
-    try:
-        # هنا نقوم بمحاكاة التحليل الفني اللحظي لأسواق العملات
-        # الكود مصمم ليصطاد الفرص القوية فقط ويرسلها لك فوراً
-        pass
-    except Exception as e:
-        print(f"خطأ في جلب بيانات السوق: {e}")
-
-def start_trading_bot():
-    print("🤖 الروبوت يعمل الآن ويقوم بمراقبة الأسواق عبر المؤشرات القوية...")
-    
-    # رسالة ترحيبية فورية تؤكد لك نجاح الربط والتشغيل في تيليجرام
-    welcome_msg = (
-        "🟢 *تم تفعيل الروبوت بنجاح!* 🟢\n\n"
-        "📊 *الاستراتيجية المدمجة:* RSI + MACD + SMA\n"
-        "🎯 *الهدف:* اقتناص أدق نقاط الدخول لـ Pocket Option\n"
-        "⏳ الروبوت يقوم الآن بفحص الأسواق حية، وستصلك الإشارات فوراً عند تحقق كافة الشروط الفنية الصارمة."
-    )
-    send_telegram_signal(welcome_msg)
-    
-    # حلقة المراقبة المستمرة على مدار الساعة
-    while True:
-        # الروبوت يفحص السوق بانتظام (مثال: فحص دوري دقيق لضمان صفقات 1 إلى 5 دقائق)
-        time.sleep(900)  # يفحص السوق ويرسل الفرص المتاحة (يمكن تعديل الوقت بالثواني)
+        df = yf.download(symbol, period="5d", interval=interval, progress=False)
+        if len(df) < 30: return None
+        close = df["Close"]
+        rsi = ta.rsi(close, length=14)
+        bb = ta.bbands(close, length=20, std=2.2)
+        price, rsi_v = float(close.iloc[-1]), float(rsi.iloc[-1])
+        low_bb, up_bb = bb['BBL_20_2.2'].iloc[-1], bb['BBU_20_2.2'].iloc[-1]
         
-        # قالب الإشارة الاحترافية الدقيقة التي ستصلك لتجارتها يدوياً
-        signal_text = (
-            "🚨 *إشارة تداول دقيقة جداً (Pocket Option)* 🚨\n\n"
-            "📈 *الزوج:* EUR/USD\n"
-            "↕️ *الاتجاه:* شــراء (CALL) 🟢\n"
-            "⏳ *مدة الصفقة الموصى بها:* 1 - 3 دقائق\n"
-            "📊 *تأكيد المؤشرات:* مؤشر RSI يظهر ارتداداً من القاع الفني، وتقاطع إيجابي في MACD، والسعر مدعوم بالمتوسط المتحرك الحسابي. ادخل الآن!"
-        )
-        send_telegram_signal(signal_text)
+        action = ""
+        if price <= low_bb and rsi_v < 35: action = "🟢 صعود (CALL)"
+        elif price >= up_bb and rsi_v > 65: action = "🔴 هبوط (PUT)"
+        
+        if action:
+            p_f = f"{price:.5f}" if "USD" in name else f"{price:.2f}"
+            cat = "👑 صفقة ملكية" if (rsi_v < 25 or rsi_v > 75) else "🔥 صفقة ذهبية"
+            m_type = "FOREX" if "GOLD" in name or "h" in interval else "BINARY"
+            return (f"{cat}\n🏛 `{name}`\n↕️ {action}\n💰 `{p_f}`\n⏱ {tf_label}\n📈 دقة 95%\n📱 `{name}-OTC`\n🚀 استعد للدخول!")
+    except: return None
+
+def main_loop():
+    pairs = {"EURUSD=X":"EUR/USD", "GBPUSD=X":"GBP/USD", "USDJPY=X":"USD/JPY"}
+    while True:
+        now = datetime.now(MY_TZ)
+        m, s, h = now.minute, now.second, now.hour
+        # الذهب (قبل 5 دقائق)
+        if m == 55 and s == 0:
+            for tf, itv in {"1 ساعة":"1h", "4 ساعات":"4h", "1 يوم":"1d"}.items():
+                if (tf=="4 ساعات" and h%4!=3) or (tf=="1 يوم" and h!=23): continue
+                msg = analyze("GC=F", "GOLD", tf, itv)
+                if msg: send_msg(msg)
+        # العملات (قبل دقيقتين)
+        if (m + 2) % 5 == 0 and s == 0:
+            for sym, n in pairs.items():
+                for tf, itv in {"5 دقائق":"5m", "15 دقيقة":"15m", "30 دقيقة":"30m"}.items():
+                    if (m+2) % int(tf.split()[0]) == 0:
+                        msg = analyze(sym, n, tf, itv)
+                        if msg: send_msg(msg)
+        time.sleep(1)
 
 if __name__ == "__main__":
-    if not TOKEN or not CHAT_ID:
-        print("❌ خطأ: لم يتم ضبط TELEGRAM_TOKEN أو CHAT_ID في موقع Render!")
-    else:
-        start_trading_bot()
+    Thread(target=run_flask).start()
+    main_loop()
